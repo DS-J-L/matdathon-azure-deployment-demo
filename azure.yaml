@@ -1,0 +1,6 @@
+name: matdathon-azure-deployment-demo
+services:
+  web:
+    project: .
+    host: staticwebapp
+    dist: dist
