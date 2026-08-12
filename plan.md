@@ -431,7 +431,7 @@ interface ScheduleRepository {
 
 8. 권장 폴더 구조
 
-src/
+frontend/src/
 ├── app/
 │   ├── App.tsx
 │   └── providers.tsx
