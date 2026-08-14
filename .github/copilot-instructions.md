@@ -202,11 +202,69 @@ npm run build
 - API나 데이터 형식을 변경했다면 호환성과 영향 범위를 문서화했다.
 - 실행하지 못한 검증이 있다면 완료했다고 표현하지 않고 이유를 알린다.
 
-## 11. Azure 배포 규칙
+## 11. Azure Skills 배포 워크플로
+
+Azure 관련 준비, 검증, 배포 작업은 일반적인 셸 명령을 임의로 조합하지 말고 다음 Azure Skills를 순서대로 사용한다.
+
+```text
+azure-prepare → azure-validate → azure-deploy
+```
+
+### 11.1 배포 준비 — `azure-prepare`
+
+- Azure 배포 준비 요청을 받으면 가장 먼저 저장소 루트에 `.azure/deployment-plan.md` 초안을 생성한다.
+- 기존 애플리케이션과 `azure.yaml`을 분석한 뒤 사용할 Azure 서비스, 리전, 비용·확장성 요구사항, 인프라 방식을 계획에 기록한다.
+- 이 저장소는 기존 `azure.yaml`을 사용하는 azd 프로젝트이므로 기존 파일을 기준으로 수정하며, 템플릿을 이용한 `azd init -t`로 프로젝트를 덮어쓰지 않는다.
+- 완성된 배포 계획을 사용자에게 보여주고 명시적인 승인을 받기 전에는 인프라 파일 생성이나 배포 작업을 실행하지 않는다.
+- 승인 후 필요한 Bicep 또는 Terraform, Dockerfile, 환경 설정을 생성하고 보안 설정과 로컬 동작을 확인한다.
+- 준비가 끝나면 `.azure/deployment-plan.md`의 상태를 `Ready for Validation`으로 변경한 뒤 `azure-validate`로 전달한다.
+- `azure-prepare` 단계에서는 `azd up`, `azd deploy`, `terraform apply` 같은 실제 배포 명령을 실행하지 않는다.
+
+### 11.2 배포 전 검증 — `azure-validate`
+
+- `.azure/deployment-plan.md`가 존재하고 승인된 상태인지 먼저 확인한다.
+- Azure Validate Skill에서 제공하는 Windows용 `workflow.ps1` 절차를 사용해 구성, 인프라, 권한, 관리 ID, 필수 도구를 단계별로 검증한다.
+- 검증 실패 항목이 있으면 원인을 수정하고 전체 관련 검증을 다시 실행한다.
+- 모든 검증이 통과하기 전에는 배포를 시작하지 않는다.
+- 계획의 상태를 임의로 `Validated`로 변경하지 않는다. 실제 검증을 완료한 `azure-validate`만 해당 상태와 검증 증거를 기록할 수 있다.
+- 사용자가 준비나 검증만 요청했다면 검증 결과를 보고하고 여기서 중단한다.
+
+### 11.3 실제 배포 — `azure-deploy`
+
+- 사용자가 실제 배포를 명시적으로 요청한 경우에만 실행한다.
+- `.azure/deployment-plan.md`의 상태가 `Validated`이고 Validation Proof가 기록되어 있는지 확인한다.
+- 배포 전 체크리스트와 RBAC 상태를 확인한 뒤 선택된 레시피에 따라 배포한다.
+- `azd up`, `azd deploy`, `terraform apply`, `az deployment` 실행은 `azure-deploy` 절차 안에서만 수행한다.
+- 배포 후 애플리케이션 엔드포인트 접근, 리소스 상태, 실제 역할 할당을 확인한다.
+- 사용자에게 제공하는 엔드포인트는 항상 `https://`를 포함한 완전한 URL로 작성한다.
+- 실패한 배포를 성공으로 보고하지 않으며, 오류 원인과 복구 또는 재시도 결과를 함께 알린다.
+
+### 11.4 이 저장소의 Azure 기준
 
 - 루트 `azure.yaml`에서 프론트엔드 프로젝트 경로는 `frontend`이다.
 - 프론트엔드 빌드 결과는 `frontend/dist`에 생성된다.
 - SPA 라우팅은 `frontend/staticwebapp.config.json`의 `navigationFallback`과 일치해야 한다.
 - 환경 변수가 필요하면 실제 값 없이 `.env.example`에 이름과 용도를 문서화한다.
-- 배포 설정을 변경한 뒤에는 최소한 프론트엔드 프로덕션 빌드를 실행한다.
+- 배포 설정을 변경한 뒤에는 최소한 프론트엔드 테스트와 프로덕션 빌드를 실행한다.
 - 백엔드 배포 구성이 실제로 추가되기 전에는 `azure.yaml`에 존재하지 않는 서비스를 가정하지 않는다.
+- 구독, 리전, 비용에 영향을 주는 선택은 사용자의 확인을 받는다.
+- 리소스 삭제나 교체 등 파괴적인 작업은 정확한 대상을 확인하고 사용자의 명시적인 승인을 받은 뒤 진행한다.
+
+### 11.5 한국어 데모 및 문서 작성 규칙
+
+- 사용자와의 대화, 진행 상황, 계획 설명, 검증 결과, 오류 원인과 배포 결과는 한국어로 작성한다.
+- `.azure/deployment-plan.md`의 목표, 요구사항, 아키텍처 설명, 선택 이유, 메모와 체크리스트 설명은 한국어로 작성한다.
+- 명령 실행 결과가 영어인 경우 원문은 그대로 보존하고, 바로 아래에 핵심 의미와 조치 사항을 한국어로 설명한다.
+- 데모 중에는 현재 단계, 완료된 작업, 다음 작업, 사용자 확인이 필요한 항목을 짧고 명확한 한국어로 안내한다.
+- 문서는 UTF-8로 저장해 Windows와 CI 환경에서 한글이 깨지지 않게 한다.
+
+다만 Azure Skills와 자동화 도구가 판독하는 다음 값은 번역하거나 변형하지 않는다.
+
+- 파일과 경로: `.azure/deployment-plan.md`, `.azure/validate-status.json`, `azure.yaml`, `infra/`
+- 상태값: `Planning`, `Approved`, `Executing`, `Ready for Validation`, `Validated`, `Deployed`
+- 필수 섹션명: `Validation Proof`
+- 배포 방식: `AZD`, `AZCLI`, `Bicep`, `Terraform`
+- 검증 단계값: `LoadPlan`, `AddValidationSteps`, `RunValidation`, `BuildVerification`, `StaticRoleVerification`, `RecordProof`, `ResolveErrors`, `UpdateStatus`
+- 명령어, 코드, YAML·JSON·Bicep·Terraform 속성명, 환경 변수명
+
+Azure 리소스 이름과 azd 환경 이름은 서비스별 문자 제한을 고려해 영문 소문자, 숫자, 하이픈을 기본으로 사용한다. 한국어 설명이 필요한 경우 영문 식별자 옆에 별도의 한국어 설명을 제공한다.
