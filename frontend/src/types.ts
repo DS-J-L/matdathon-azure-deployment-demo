@@ -12,6 +12,8 @@ export interface Schedule {
   createdAt: string;
 }
 
+export type ScheduleInput = Omit<Schedule, 'id' | 'createdAt'>;
+
 export interface ScheduleFormValues {
   title: string;
   description: string;

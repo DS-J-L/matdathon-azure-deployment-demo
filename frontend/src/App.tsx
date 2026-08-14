@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { addDays, differenceInMinutes, endOfMonth, format, isSameDay, isSameMonth, startOfMonth, subDays } from 'date-fns';
 import { CheckCircle2, Plus, Sparkles, Trash2 } from 'lucide-react';
-import { loadSchedules, saveSchedules } from './lib/storage';
+import { createSchedule, listSchedules, removeSchedule, updateSchedule } from './lib/scheduleApi';
+import { isLegacyMigrationComplete, loadLegacySchedules, markLegacyMigrationComplete } from './lib/storage';
 import { eventDate, formatEventDateLabel } from './lib/eventSchedule';
-import type { Schedule, ScheduleCategory, ScheduleFormValues, ScheduleStatus } from './types';
+import type { Schedule, ScheduleCategory, ScheduleFormValues, ScheduleInput, ScheduleStatus } from './types';
 
 const CATEGORY_META: Record<ScheduleCategory, { label: string; color: string }> = {
   official: { label: '공식 일정', color: '#5E8C61' },
@@ -22,8 +23,25 @@ const emptyFormValues = (selectedDate: Date): ScheduleFormValues => ({
   status: 'scheduled'
 });
 
+const toScheduleInput = (schedule: Schedule): ScheduleInput => ({
+  title: schedule.title,
+  description: schedule.description,
+  startAt: schedule.startAt,
+  endAt: schedule.endAt,
+  category: schedule.category,
+  status: schedule.status
+});
+
+const hasEquivalentSchedule = (schedules: Schedule[], candidate: Schedule): boolean =>
+  schedules.some((schedule) =>
+    schedule.title === candidate.title
+    && schedule.startAt === candidate.startAt
+    && schedule.endAt === candidate.endAt
+    && schedule.category === candidate.category
+  );
+
 function App() {
-  const [schedules, setSchedules] = useState<Schedule[]>(() => loadSchedules());
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -31,6 +49,52 @@ function App() {
   const [formValues, setFormValues] = useState<ScheduleFormValues>(() => emptyFormValues(new Date()));
   const [errors, setErrors] = useState<Partial<Record<keyof ScheduleFormValues, string>>>({});
   const [toast, setToast] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadRemoteSchedules = async () => {
+      setIsLoading(true);
+      setLoadError('');
+      try {
+        let remoteSchedules = await listSchedules();
+
+        if (!isLegacyMigrationComplete() && remoteSchedules.length === 0) {
+          const migratedSchedules = [...remoteSchedules];
+          for (const legacySchedule of loadLegacySchedules()) {
+            if (!hasEquivalentSchedule(migratedSchedules, legacySchedule)) {
+              const created = await createSchedule(toScheduleInput(legacySchedule));
+              migratedSchedules.push(created);
+            }
+          }
+          remoteSchedules = migratedSchedules;
+          markLegacyMigrationComplete();
+        }
+
+        if (isActive) {
+          setSchedules(remoteSchedules);
+        }
+      } catch {
+        if (isActive) {
+          setLoadError('일정을 불러오지 못했습니다. 백엔드 연결을 확인하고 다시 시도해주세요.');
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadRemoteSchedules();
+    return () => {
+      isActive = false;
+    };
+  }, [reloadToken]);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -105,11 +169,18 @@ function App() {
     setErrors({});
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const showToast = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 1800);
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const nextErrors: Partial<Record<keyof ScheduleFormValues, string>> = {};
 
     if (!formValues.title.trim()) nextErrors.title = '제목을 입력해주세요.';
+    if (formValues.title.trim().length > 50) nextErrors.title = '제목은 50자 이하로 입력해주세요.';
+    if (formValues.description.trim().length > 500) nextErrors.description = '설명은 500자 이하로 입력해주세요.';
     if (!formValues.date) nextErrors.date = '날짜를 선택해주세요.';
     if (!formValues.startTime) nextErrors.startTime = '시작 시간을 선택해주세요.';
     if (!formValues.endTime) nextErrors.endTime = '종료 시간을 선택해주세요.';
@@ -124,47 +195,64 @@ function App() {
       return;
     }
 
-    const nextSchedule: Schedule = {
-      id: editingId ?? crypto.randomUUID(),
+    const input: ScheduleInput = {
       title: formValues.title.trim(),
       description: formValues.description.trim(),
       startAt: startDateTime.toISOString(),
       endAt: endDateTime.toISOString(),
       category: formValues.category,
-      status: formValues.status,
-      createdAt: new Date().toISOString()
+      status: formValues.status
     };
 
-    const updatedSchedules = editingId
-      ? schedules.map((item) => (item.id === editingId ? nextSchedule : item))
-      : [nextSchedule, ...schedules];
-
-    setSchedules(updatedSchedules);
-    saveSchedules(updatedSchedules);
-    setToast(editingId ? '일정을 수정했어요.' : '일정을 추가했어요.');
-    setTimeout(() => setToast(''), 1800);
-    closeModal();
-    setSelectedDate(startDateTime);
+    setIsSaving(true);
+    setActionError('');
+    try {
+      const saved = editingId
+        ? await updateSchedule(editingId, input)
+        : await createSchedule(input);
+      setSchedules((current) =>
+        editingId
+          ? current.map((item) => (item.id === editingId ? saved : item))
+          : [...current, saved]
+      );
+      showToast(editingId ? '일정을 수정했어요.' : '일정을 추가했어요.');
+      closeModal();
+      setSelectedDate(startDateTime);
+    } catch {
+      setActionError('일정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const toggleStatus = (scheduleId: string) => {
-    const updated: Schedule[] = schedules.map((schedule) =>
-      schedule.id === scheduleId
-        ? { ...schedule, status: schedule.status === 'scheduled' ? 'completed' : 'scheduled' }
-        : schedule
-    );
-    setSchedules(updated);
-    saveSchedules(updated);
-    setToast('일정 상태를 변경했어요.');
-    setTimeout(() => setToast(''), 1800);
+  const toggleStatus = async (scheduleId: string) => {
+    const schedule = schedules.find((item) => item.id === scheduleId);
+    if (!schedule) return;
+
+    setActionError('');
+    try {
+      const updated = await updateSchedule(scheduleId, {
+        ...toScheduleInput(schedule),
+        status: schedule.status === 'scheduled' ? 'completed' : 'scheduled'
+      });
+      setSchedules((current) =>
+        current.map((item) => (item.id === scheduleId ? updated : item))
+      );
+      showToast('일정 상태를 변경했어요.');
+    } catch {
+      setActionError('일정 상태를 변경하지 못했습니다.');
+    }
   };
 
-  const deleteSchedule = (scheduleId: string) => {
-    const updated = schedules.filter((schedule) => schedule.id !== scheduleId);
-    setSchedules(updated);
-    saveSchedules(updated);
-    setToast('일정을 삭제했어요.');
-    setTimeout(() => setToast(''), 1800);
+  const deleteSchedule = async (scheduleId: string) => {
+    setActionError('');
+    try {
+      await removeSchedule(scheduleId);
+      setSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId));
+      showToast('일정을 삭제했어요.');
+    } catch {
+      setActionError('일정을 삭제하지 못했습니다.');
+    }
   };
 
   return (
@@ -174,10 +262,21 @@ function App() {
           <p className="eyebrow">맞다톤 일정 관리</p>
           <h1>행사 일정과 팀 마감 한눈에</h1>
         </div>
-        <button className="primary-button" onClick={() => openModal(selectedDate)}>
+        <button className="primary-button" onClick={() => openModal(selectedDate)} disabled={isLoading}>
           <Plus size={16} /> 일정 추가
         </button>
       </header>
+
+      {isLoading ? <p className="notice" role="status">일정을 불러오는 중입니다.</p> : null}
+      {loadError ? (
+        <div className="notice error-notice" role="alert">
+          <span>{loadError}</span>
+          <button className="secondary-button" onClick={() => setReloadToken((value) => value + 1)}>
+            다시 시도
+          </button>
+        </div>
+      ) : null}
+      {actionError ? <p className="notice error-notice" role="alert">{actionError}</p> : null}
 
       <main className="main-grid">
         <section className="panel calendar-panel">
@@ -268,7 +367,14 @@ function App() {
                   <strong>{schedule.title}</strong>
                   <p>{format(new Date(schedule.startAt), 'HH:mm')} - {format(new Date(schedule.endAt), 'HH:mm')}</p>
                 </div>
-                <button className="icon-button" onClick={(event) => { event.stopPropagation(); toggleStatus(schedule.id); }}>
+                <button
+                  className="icon-button"
+                  aria-label={`${schedule.title} 상태 변경`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void toggleStatus(schedule.id);
+                  }}
+                >
                   <CheckCircle2 size={16} />
                 </button>
               </div>
@@ -288,7 +394,11 @@ function App() {
                     <strong>{schedule.title}</strong>
                     <p>{diffInMinutes}분 후 시작</p>
                   </div>
-                  <button className="icon-button" onClick={() => deleteSchedule(schedule.id)}>
+                  <button
+                    className="icon-button"
+                    aria-label={`${schedule.title} 삭제`}
+                    onClick={() => void deleteSchedule(schedule.id)}
+                  >
                     <Trash2 size={16} />
                   </button>
                 </div>
@@ -303,7 +413,7 @@ function App() {
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>{editingId ? '일정 수정' : '일정 추가'}</h3>
-              <button className="icon-button" onClick={closeModal}>×</button>
+              <button className="icon-button" aria-label="일정 창 닫기" onClick={closeModal}>×</button>
             </div>
             <form onSubmit={handleSubmit} className="form-grid">
               <label>
@@ -344,10 +454,13 @@ function App() {
               <label className="full-width">
                 <span>설명</span>
                 <textarea value={formValues.description} onChange={(event) => setFormValues({ ...formValues, description: event.target.value })} />
+                {errors.description ? <small>{errors.description}</small> : null}
               </label>
               <div className="modal-actions full-width">
-                <button type="button" className="secondary-button" onClick={closeModal}>취소</button>
-                <button type="submit" className="primary-button">저장</button>
+                <button type="button" className="secondary-button" onClick={closeModal} disabled={isSaving}>취소</button>
+                <button type="submit" className="primary-button" disabled={isSaving}>
+                  {isSaving ? '저장 중...' : '저장'}
+                </button>
               </div>
             </form>
           </div>

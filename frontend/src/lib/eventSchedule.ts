@@ -57,7 +57,7 @@ const officialScheduleItems: EventScheduleItem[] = [
   {
     title: '과제 제출 마감',
     startTime: '17:00',
-    endTime: '17:00',
+    endTime: '17:01',
     category: 'deadline',
     description: 'Azure 배포 주소 제출 마감'
   },
