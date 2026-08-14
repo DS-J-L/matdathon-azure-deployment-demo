@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { addDays, differenceInMinutes, endOfMonth, format, isSameDay, isSameMonth, startOfMonth, subDays } from 'date-fns';
-import { CheckCircle2, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Plus, Trash2, X } from 'lucide-react';
 import { createSchedule, listSchedules, removeSchedule, updateSchedule } from './lib/scheduleApi';
 import { isLegacyMigrationComplete, loadLegacySchedules, markLegacyMigrationComplete } from './lib/storage';
-import { eventDate, formatEventDateLabel } from './lib/eventSchedule';
+import { eventDate } from './lib/eventSchedule';
 import type { Schedule, ScheduleCategory, ScheduleFormValues, ScheduleInput, ScheduleStatus } from './types';
 
 const CATEGORY_META: Record<ScheduleCategory, { label: string; color: string }> = {
@@ -39,6 +39,15 @@ const hasEquivalentSchedule = (schedules: Schedule[], candidate: Schedule): bool
     && schedule.endAt === candidate.endAt
     && schedule.category === candidate.category
   );
+
+const formatRemainingTime = (minutes: number): string => {
+  if (minutes < 60) return `${minutes}분 남음`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0
+    ? `${hours}시간 ${remainingMinutes}분 남음`
+    : `${hours}시간 남음`;
+};
 
 function App() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -81,7 +90,7 @@ function App() {
         }
       } catch {
         if (isActive) {
-          setLoadError('일정을 불러오지 못했습니다. 백엔드 연결을 확인하고 다시 시도해주세요.');
+          setLoadError('서버에서 일정을 불러오지 못했습니다.');
         }
       } finally {
         if (isActive) {
@@ -121,25 +130,37 @@ function App() {
 
   const nextUpcoming = useMemo(() => {
     const upcoming = schedules
-      .filter((schedule) => new Date(schedule.startAt).getTime() >= Date.now())
+      .filter((schedule) =>
+        schedule.status === 'scheduled'
+        && new Date(schedule.startAt).getTime() >= Date.now()
+      )
       .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
     return upcoming[0] ?? null;
   }, [schedules]);
 
   const todaySchedules = useMemo(() => {
     return schedules
-      .filter((schedule) => isSameDay(new Date(schedule.startAt), new Date()))
+      .filter((schedule) =>
+        schedule.status === 'scheduled'
+        && isSameDay(new Date(schedule.startAt), new Date())
+      )
       .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
   }, [schedules]);
 
-  const eventDayLabel = useMemo(() => formatEventDateLabel(new Date(eventDate)), []);
+  const eventDayLabel = useMemo(
+    () => format(new Date(`${eventDate}T12:00:00`), 'yyyy년 M월 d일'),
+    []
+  );
 
   const urgentSchedules = useMemo(() => {
     const now = Date.now();
     return schedules.filter((schedule) => {
       const start = new Date(schedule.startAt).getTime();
       const diff = start - now;
-      return diff > 0 && diff <= 24 * 60 * 60 * 1000;
+      return schedule.category === 'deadline'
+        && schedule.status === 'scheduled'
+        && diff > 0
+        && diff <= 24 * 60 * 60 * 1000;
     }).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
   }, [schedules]);
 
@@ -215,11 +236,11 @@ function App() {
           ? current.map((item) => (item.id === editingId ? saved : item))
           : [...current, saved]
       );
-      showToast(editingId ? '일정을 수정했어요.' : '일정을 추가했어요.');
+      showToast(editingId ? '일정을 수정했습니다.' : '일정을 추가했습니다.');
       closeModal();
       setSelectedDate(startDateTime);
     } catch {
-      setActionError('일정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.');
+      setActionError('일정을 저장하지 못했습니다.');
     } finally {
       setIsSaving(false);
     }
@@ -238,7 +259,7 @@ function App() {
       setSchedules((current) =>
         current.map((item) => (item.id === scheduleId ? updated : item))
       );
-      showToast('일정 상태를 변경했어요.');
+      showToast('일정 상태를 변경했습니다.');
     } catch {
       setActionError('일정 상태를 변경하지 못했습니다.');
     }
@@ -249,7 +270,7 @@ function App() {
     try {
       await removeSchedule(scheduleId);
       setSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId));
-      showToast('일정을 삭제했어요.');
+      showToast('일정을 삭제했습니다.');
     } catch {
       setActionError('일정을 삭제하지 못했습니다.');
     }
@@ -258,16 +279,21 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">맞다톤 일정 관리</p>
-          <h1>행사 일정과 팀 마감 한눈에</h1>
+        <div className="brand-lockup">
+          <span className="brand-mark" aria-hidden="true">
+            <CalendarDays size={22} />
+          </span>
+          <div>
+            <p className="eyebrow">{eventDayLabel}</p>
+            <h1>맞다톤 일정</h1>
+          </div>
         </div>
         <button className="primary-button" onClick={() => openModal(selectedDate)} disabled={isLoading}>
-          <Plus size={16} /> 일정 추가
+          <Plus size={17} /> 새 일정
         </button>
       </header>
 
-      {isLoading ? <p className="notice" role="status">일정을 불러오는 중입니다.</p> : null}
+      {isLoading ? <p className="notice" role="status">일정을 불러오는 중</p> : null}
       {loadError ? (
         <div className="notice error-notice" role="alert">
           <span>{loadError}</span>
@@ -282,13 +308,25 @@ function App() {
         <section className="panel calendar-panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">월간 캘린더</p>
+              <p className="section-label">월간 일정</p>
               <h2>{format(currentMonth, 'yyyy년 M월')}</h2>
             </div>
             <div className="month-controls">
-              <button onClick={() => setCurrentMonth(subDays(startOfMonth(currentMonth), 1))}>이전</button>
+              <button
+                className="month-icon-button"
+                aria-label="이전 달"
+                onClick={() => setCurrentMonth(subDays(startOfMonth(currentMonth), 1))}
+              >
+                <ChevronLeft size={18} />
+              </button>
               <button onClick={() => setCurrentMonth(new Date())}>오늘</button>
-              <button onClick={() => setCurrentMonth(addDays(endOfMonth(currentMonth), 1))}>다음</button>
+              <button
+                className="month-icon-button"
+                aria-label="다음 달"
+                onClick={() => setCurrentMonth(addDays(endOfMonth(currentMonth), 1))}
+              >
+                <ChevronRight size={18} />
+              </button>
             </div>
           </div>
 
@@ -308,15 +346,22 @@ function App() {
                 <button
                   key={day.toISOString()}
                   className={`day-cell ${!isCurrentMonth ? 'muted' : ''} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
+                  aria-label={`${format(day, 'M월 d일')}, 일정 ${daySchedules.length}개`}
                   onClick={() => {
                     setSelectedDate(day);
                     setCurrentMonth(day);
                   }}
                 >
-                  <span className="day-number">{format(day, 'd')}</span>
+                  <span className="day-cell-header">
+                    <span className="day-number">{format(day, 'd')}</span>
+                    {daySchedules.length > 0 ? <span className="day-total">{daySchedules.length}</span> : null}
+                  </span>
                   <div className="day-schedule-list">
                     {daySchedules.slice(0, 2).map((schedule) => (
-                      <span key={schedule.id} className="dot" style={{ backgroundColor: CATEGORY_META[schedule.category].color }} />
+                      <span key={schedule.id} className="day-event">
+                        <span className="dot" style={{ backgroundColor: CATEGORY_META[schedule.category].color }} />
+                        <span className="day-event-title">{schedule.title}</span>
+                      </span>
                     ))}
                     {daySchedules.length > 2 ? <span className="day-count">+{daySchedules.length - 2}</span> : null}
                   </div>
@@ -326,23 +371,30 @@ function App() {
           </div>
         </section>
 
-        <aside className="panel side-panel">
+        <aside className="panel side-panel" aria-label="일정 요약">
           <div className="summary-card">
-            <div className="summary-top">
-              <Sparkles size={18} />
-              <span>오늘의 일정 요약</span>
+            <div>
+              <p className="section-label">오늘</p>
+              <p className="summary-date">{format(new Date(), 'M월 d일')}</p>
             </div>
-            <h3>{eventDayLabel}</h3>
-            <p>{todaySchedules.length}개 일정이 남아 있어요.</p>
+            <div className="summary-count">
+              <strong>{todaySchedules.length}</strong>
+              <span>예정</span>
+            </div>
           </div>
 
           <div className="card-list">
             <div className="card-title-row">
               <h3>다음 일정</h3>
-              <span>{nextUpcoming ? format(new Date(nextUpcoming.startAt), 'HH:mm') : '없음'}</span>
+              {nextUpcoming ? (
+                <span className="time-label">
+                  <Clock3 size={13} />
+                  {format(new Date(nextUpcoming.startAt), 'HH:mm')}
+                </span>
+              ) : null}
             </div>
             {nextUpcoming ? (
-              <div className={`schedule-card ${nextUpcoming.category === 'deadline' ? 'urgent' : ''}`}>
+              <div className={`next-schedule ${nextUpcoming.category === 'deadline' ? 'urgent' : ''}`}>
                 <div>
                   <strong>{nextUpcoming.title}</strong>
                   <p>{format(new Date(nextUpcoming.startAt), 'M월 d일 HH:mm')} - {format(new Date(nextUpcoming.endAt), 'HH:mm')}</p>
@@ -352,21 +404,29 @@ function App() {
                 </span>
               </div>
             ) : (
-              <p className="empty-text">오늘과 내일 일정이 없어요.</p>
+              <p className="empty-text">예정된 일정이 없습니다.</p>
             )}
           </div>
 
           <div className="card-list">
             <div className="card-title-row">
-              <h3>선택 날짜 일정</h3>
-              <span>{format(selectedDate, 'M월 d일')}</span>
+              <h3>{format(selectedDate, 'M월 d일')} 일정</h3>
+              <span className="item-count">{selectedDateSchedules.length}</span>
             </div>
             {selectedDateSchedules.length > 0 ? selectedDateSchedules.map((schedule) => (
-              <div key={schedule.id} className="schedule-card detail-card" onClick={() => openModal(selectedDate, schedule)}>
-                <div>
-                  <strong>{schedule.title}</strong>
-                  <p>{format(new Date(schedule.startAt), 'HH:mm')} - {format(new Date(schedule.endAt), 'HH:mm')}</p>
-                </div>
+              <article key={schedule.id} className={`schedule-row ${schedule.status === 'completed' ? 'completed' : ''}`}>
+                <button className="schedule-main" onClick={() => openModal(selectedDate, schedule)}>
+                  <span
+                    className="category-marker"
+                    style={{ backgroundColor: CATEGORY_META[schedule.category].color }}
+                  />
+                  <span>
+                    <strong>{schedule.title}</strong>
+                    <span className="schedule-time">
+                      {format(new Date(schedule.startAt), 'HH:mm')} - {format(new Date(schedule.endAt), 'HH:mm')}
+                    </span>
+                  </span>
+                </button>
                 <button
                   className="icon-button"
                   aria-label={`${schedule.title} 상태 변경`}
@@ -377,8 +437,8 @@ function App() {
                 >
                   <CheckCircle2 size={16} />
                 </button>
-              </div>
-            )) : <p className="empty-text">이 날짜에는 일정이 없어요.</p>}
+              </article>
+            )) : <p className="empty-text">등록된 일정이 없습니다.</p>}
           </div>
 
           <div className="card-list">
@@ -389,10 +449,10 @@ function App() {
             {urgentSchedules.length > 0 ? urgentSchedules.map((schedule) => {
               const diffInMinutes = differenceInMinutes(new Date(schedule.startAt), new Date());
               return (
-                <div key={schedule.id} className="schedule-card">
+                <div key={schedule.id} className="deadline-row">
                   <div>
                     <strong>{schedule.title}</strong>
-                    <p>{diffInMinutes}분 후 시작</p>
+                    <p>{formatRemainingTime(diffInMinutes)}</p>
                   </div>
                   <button
                     className="icon-button"
@@ -403,17 +463,28 @@ function App() {
                   </button>
                 </div>
               );
-            }) : <p className="empty-text">24시간 안에 시작하는 일정이 없어요.</p>}
+            }) : <p className="empty-text">24시간 안에 마감이 없습니다.</p>}
           </div>
         </aside>
       </main>
 
       {isModalOpen ? (
         <div className="modal-backdrop" onClick={closeModal}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="schedule-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="modal-header">
-              <h3>{editingId ? '일정 수정' : '일정 추가'}</h3>
-              <button className="icon-button" aria-label="일정 창 닫기" onClick={closeModal}>×</button>
+              <div>
+                <p className="section-label">{editingId ? '일정 편집' : '새 일정'}</p>
+                <h3 id="schedule-modal-title">{editingId ? '일정 수정' : '일정 추가'}</h3>
+              </div>
+              <button className="icon-button" aria-label="일정 창 닫기" onClick={closeModal}>
+                <X size={18} />
+              </button>
             </div>
             <form onSubmit={handleSubmit} className="form-grid">
               <label>
@@ -467,7 +538,7 @@ function App() {
         </div>
       ) : null}
 
-      {toast ? <div className="toast">{toast}</div> : null}
+      {toast ? <div className="toast" role="status">{toast}</div> : null}
     </div>
   );
 }

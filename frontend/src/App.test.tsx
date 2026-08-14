@@ -56,12 +56,12 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('초기 일정')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /일정 추가/i }));
+    expect((await screen.findAllByText('초기 일정')).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: /새 일정/i }));
     await user.type(screen.getByLabelText(/제목/i), '테스트 일정');
     await user.click(screen.getByRole('button', { name: '저장' }));
 
-    expect(await screen.findByText(/일정을 추가했어요/i)).toBeInTheDocument();
+    expect(await screen.findByText(/일정을 추가했습니다/i)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/schedules'),
       expect.objectContaining({ method: 'POST' })
@@ -90,10 +90,10 @@ describe('App', () => {
     await user.type(titleInput, '수정된 일정');
     await user.click(screen.getByRole('button', { name: '저장' }));
 
-    expect(await screen.findByText(/일정을 수정했어요/i)).toBeInTheDocument();
+    expect(await screen.findByText(/일정을 수정했습니다/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '수정된 일정 상태 변경' }));
 
-    expect(await screen.findByText(/일정 상태를 변경했어요/i)).toBeInTheDocument();
+    expect(await screen.findByText(/일정 상태를 변경했습니다/i)).toBeInTheDocument();
     const putBodies = fetchMock.mock.calls
       .filter(([, init]) => init?.method === 'PUT')
       .map(([, init]) => JSON.parse(String(init?.body)) as ScheduleInput);
@@ -106,6 +106,7 @@ describe('App', () => {
     const start = new Date(Date.now() + 60 * 60 * 1000);
     urgent.id = 'urgent-1';
     urgent.title = '삭제할 일정';
+    urgent.category = 'deadline';
     urgent.startAt = start.toISOString();
     urgent.endAt = new Date(start.getTime() + 60 * 60 * 1000).toISOString();
 
@@ -121,7 +122,7 @@ describe('App', () => {
     await screen.findAllByText('삭제할 일정');
     await user.click(screen.getByRole('button', { name: '삭제할 일정 삭제' }));
 
-    expect(await screen.findByText(/일정을 삭제했어요/i)).toBeInTheDocument();
+    expect(await screen.findByText(/일정을 삭제했습니다/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '삭제할 일정 삭제' })).not.toBeInTheDocument();
   });
 
@@ -131,8 +132,8 @@ describe('App', () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await screen.findByText('초기 일정');
-    await user.click(screen.getByRole('button', { name: /일정 추가/i }));
+    await screen.findAllByText('초기 일정');
+    await user.click(screen.getByRole('button', { name: /새 일정/i }));
     await user.type(screen.getByLabelText(/제목/i), '잘못된 일정');
     await user.clear(screen.getByLabelText(/종료 시간/i));
     await user.type(screen.getByLabelText(/종료 시간/i), '08:00');
@@ -163,7 +164,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('초기 일정')).toBeInTheDocument();
+    expect((await screen.findAllByText('초기 일정')).length).toBeGreaterThan(0);
     expect(window.localStorage.getItem('matdathon-schedules-api-migrated')).toBe('true');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -180,7 +181,7 @@ describe('App', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/일정을 불러오지 못했습니다/i);
     await user.click(screen.getByRole('button', { name: '다시 시도' }));
 
-    expect(await screen.findByText('초기 일정')).toBeInTheDocument();
+    expect((await screen.findAllByText('초기 일정')).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
