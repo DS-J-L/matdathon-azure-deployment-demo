@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+.venv/
+__pycache__/
+*.py[cod]
 
 # Build output
 dist/
@@ -35,4 +38,3 @@ pnpm-debug.log*
 !.vscode/settings.json
 .DS_Store
 Thumbs.db
-
